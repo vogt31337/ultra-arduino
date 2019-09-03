@@ -34,9 +34,6 @@
 #define REV_LED 12
 #define REV_SERVO_PIN 9
 
-// Quite complex to calculate, depends on your resistor values
-#define BAT_SCALE_FACTOR 0.4f
-
 #define DEBOUNCE_DELAY 50l
 
 // uncomment to inverse your potentiometer
@@ -152,7 +149,7 @@ void loop() {
         whichADCtoRead = 1;
         break;
       case 1:
-        battery_level = value * BAT_SCALE_FACTOR;
+        battery_level = 1.1 / value * 1024.0;
         ADMUX = bit(REFS0) | bit(REFS1) | (POT_PIN & 0x07);
         whichADCtoRead = 0;
         break;
