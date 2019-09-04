@@ -11,10 +11,11 @@
  * 
  */
  
-//----SETTINGS YOU CAN CHANGE
+// ---- SETTINGS YOU CAN CHANGE ----
 #define POT_PIN 7
 #define BAT_PIN 6
 #define FIRE_PIN 5
+#define OPTO_PIN 8
 
 // -- Trigger Pin --
 #define TRG_PIN 4
@@ -30,7 +31,7 @@
 #define REV_SERVO_PIN 9
 
 // -- Delay Section --
-#define DEBOUNCE_DELAY 50l
+#define DEBOUNCE_DELAY 10
 #define FIRE_ON_DURATION 300
 #define FIRE_OFF_DURATION 500
 
@@ -38,15 +39,17 @@
 float MaxServo = 180;             // Reduce this if you want to electronically Limit your RPM / FPS .. 0 being 0% 180 being 100%
 float MinServo = 0;
 
-// -- Don't change the below setting --
+// ---- Don't change the below setting ----
 
+#ifdef REV_PIN
 #include <Servo.h>
 Servo rev_servo;
+bool RevTrigger = false;
+#endif
 
 unsigned long lastDebounceTime[4] = {0, 0, 0, 0};
 int lastButtonState[4] = {LOW, LOW, LOW, LOW};
 
-bool RevTrigger = false;
 bool Trigger = false;
 int fire_case = 0;
 
@@ -56,6 +59,11 @@ float battery_level = 0.0f;
 int fire_count = 0;
 unsigned long fire_event = 0;
 
+#ifdef OPTO_PIN
+unsigned long opto_timing = 0;
+float opto_fps = 0.0f;
+#endif
+
 void setup()
 {
   Serial.begin(115200);
@@ -64,6 +72,10 @@ void setup()
   pinMode(FIRE_PIN, OUTPUT);
   pinMode(FIRE_SELECT_PIN1, INPUT_PULLUP);
   pinMode(FIRE_SELECT_PIN2, INPUT_PULLUP);
+
+  #ifdef OPTO_PIN
+  pinMode(OPTO_PIN, INPUT);
+  #endif
 
   ADCSRA =  bit(ADEN);
   ADCSRA |= bit(ADPS0) | bit(ADPS1) | bit(ADPS2);
@@ -92,11 +104,8 @@ void Buttonsstate(unsigned long time_millis)
   }
   
   if ((time_millis - lastDebounceTime[0]) > DEBOUNCE_DELAY) {
-    RevTrigger = true;
-    digitalWrite(REV_LED, HIGH);
-  } else {
-    RevTrigger = false;
-    digitalWrite(REV_LED, LOW);
+    RevTrigger = (bool) rev_state;
+    digitalWrite(REV_LED, rev_state);
   }
   #endif
   
@@ -106,26 +115,52 @@ void Buttonsstate(unsigned long time_millis)
     lastDebounceTime[1] = time_millis;
   }
 
-  if ((time_millis - lastDebounceTime[1]) > DEBOUNCE_DELAY) {
-    Trigger = true;
-    digitalWrite(TRG_LED, HIGH);
+  int fr1_state = digitalRead(FIRE_SELECT_PIN1);
+
+  if (fr1_state != lastButtonState[2]) {
+    lastDebounceTime[2] = time_millis;
+  }
+
+  int fr2_state = digitalRead(FIRE_SELECT_PIN2);
+
+  if (fr2_state != lastButtonState[3]) {
+    lastDebounceTime[3] = time_millis;
+  }
+
+  #ifdef OPTO_PIN
+  int opto_state = digitalRead(OPTO_PIN);
+
+  if (opto_state) {
+    opto_timing = micros();
   } else {
-    Trigger = false;
-    digitalWrite(TRG_LED, LOW);
+    opto_timing = micros() - opto_timing;
+    // divide size of dart by timing to get fps
+    // dart size is 2.84in = 0.236667ft
+    // one second has 1.000.000us 
+    opto_fps = 236667.6f / opto_timing;
+  }  
+  #endif
+
+  if ((time_millis - lastDebounceTime[1]) > DEBOUNCE_DELAY) {
+    Trigger = (bool) trg_state;
+    digitalWrite(TRG_LED, trg_state);
   }
 
   if ((time_millis - lastDebounceTime[2]) > DEBOUNCE_DELAY) {
-    fire_case |= (1 << 1);
-  } else {
-    fire_case &= ~(1 << 1);
+    if (fr1_state) {
+      fire_case |= (1 << 1);
+    } else {
+      fire_case &= ~(1 << 1);
+    }
   }
 
   if ((time_millis - lastDebounceTime[3]) > DEBOUNCE_DELAY) {
-    fire_case |= (1 << 2);
-  } else {
-    fire_case &= ~(1 << 2);
+    if (fr2_state) {
+      fire_case |= (1 << 2);
+    } else {
+      fire_case &= ~(1 << 2);
+    }
   }
-
 } // buttonState
 
 /*
