@@ -10,46 +10,41 @@
  * Needed external libs:
  * 
  */
-
-//Battery + "Bucked" down > 5ish volts in at +5
-//Battery - > GND
-//Trigger > D2
-// Servo Signal (PULSE) > D9
-// Servo Signal (PULSE) > D10
-// trimpot > A7
-
+ 
+//----SETTINGS YOU CAN CHANGE
 #define POT_PIN 7
 #define BAT_PIN 6
+#define FIRE_PIN 5
 
 // -- Trigger Pin --
-#define TRG_PIN D3
+#define TRG_PIN 4
 #define TRG_LED 13
 
 // -- Fire Selector --
-#define FIRE_SELECT_PIN1 D3
-#define FIRE_SELECT_PIN2 D4
+#define FIRE_SELECT_PIN1 2
+#define FIRE_SELECT_PIN2 1
 
 // -- BLDC Rev System --
-#define REV_PIN D2
+#define REV_PIN 82
 #define REV_LED 12
 #define REV_SERVO_PIN 9
 
+// -- Delay Section --
 #define DEBOUNCE_DELAY 50l
+#define FIRE_ON_DURATION 300
+#define FIRE_OFF_DURATION 500
 
-// uncomment to inverse your potentiometer
-//#define INVERT_POT_DIRECTION 1
-
-//----SETTINGS YOU CAN CHANGE
-float MaxServo = 180;       // Reduce this if you want to electronically Limit your RPM / FPS .. 1000 being 0% 2000 being 100%
+//#define INVERT_POT_DIRECTION 1  // uncomment to inverse your potentiometer
+float MaxServo = 180;             // Reduce this if you want to electronically Limit your RPM / FPS .. 0 being 0% 180 being 100%
 float MinServo = 0;
 
-// Don't change the below setting
+// -- Don't change the below setting --
 
 #include <Servo.h>
 Servo rev_servo;
 
-unsigned long[4] lastDebounceTime = {0, 0, 0, 0};
-int[4] lastButtonState = {LOW, LOW, LOW, LOW};
+unsigned long lastDebounceTime[4] = {0, 0, 0, 0};
+int lastButtonState[4] = {LOW, LOW, LOW, LOW};
 
 bool RevTrigger = false;
 bool Trigger = false;
@@ -58,12 +53,15 @@ int fire_case = 0;
 int whichADCtoRead = 0; // 0 = Pot, 1 = Battery
 int max_pot = MaxServo;
 float battery_level = 0.0f;
+int fire_count = 0;
+unsigned long fire_event = 0;
 
 void setup()
 {
   Serial.begin(115200);
   pinMode(TRG_PIN, INPUT_PULLUP);
   pinMode(POT_PIN, INPUT);
+  pinMode(FIRE_PIN, OUTPUT);
   pinMode(FIRE_SELECT_PIN1, INPUT_PULLUP);
   pinMode(FIRE_SELECT_PIN2, INPUT_PULLUP);
 
@@ -72,9 +70,12 @@ void setup()
   ADMUX =  bit(REFS0) | bit(REFS1) | (POT_PIN & 0x07);
   bitSet(ADCSRA, ADSC);
 
+  #ifdef REV_PIN
   pinMode(REV_PIN, INPUT_PULLUP);
+  pinMode(REV_LED, OUTPUT);
   rev_servo.attach(REV_SERVO_PIN);
   rev_servo.write(MinServo);
+  #endif
 }
 
 /**
@@ -83,13 +84,11 @@ void setup()
  */
 void Buttonsstate(unsigned long time_millis)
 {
+  #ifdef REV_PIN
   int rev_state = digitalRead(REV_PIN);
-  int trg_state = digitalRead(TRG_PIN);
-
+  
   if (rev_state != lastButtonState[0]) {
     lastDebounceTime[0] = time_millis;
-  } else if (trg_state != lastButtonState[1]) {
-    lastDebounceTime[1] = time_millis;
   }
   
   if ((time_millis - lastDebounceTime[0]) > DEBOUNCE_DELAY) {
@@ -98,6 +97,13 @@ void Buttonsstate(unsigned long time_millis)
   } else {
     RevTrigger = false;
     digitalWrite(REV_LED, LOW);
+  }
+  #endif
+  
+  int trg_state = digitalRead(TRG_PIN);
+
+  if (trg_state != lastButtonState[1]) {
+    lastDebounceTime[1] = time_millis;
   }
 
   if ((time_millis - lastDebounceTime[1]) > DEBOUNCE_DELAY) {
@@ -134,7 +140,6 @@ int pot(int current_pot) {
   #endif
 }
 
-
 void loop() {
   unsigned long time_millis = millis();
   Buttonsstate(time_millis);
@@ -157,24 +162,38 @@ void loop() {
     bitSet(ADCSRA, ADSC);
   }
 
+  #ifdef REV_PIN
   // REV Trigger Section
   if (RevTrigger) {
-    rev_servo.write(max_pot)
+    rev_servo.write(max_pot);
   } else {
     rev_servo.write(MinServo);
   }
+  #endif
 
   // Trigger Section
   if (Trigger) {
+    if (time_millis > fire_event && fire_count > 0) {
+      if (fire_count % 2 == 0) {
+        digitalWrite(FIRE_PIN, HIGH);
+        fire_event = time_millis + FIRE_ON_DURATION;
+      } else {
+        digitalWrite(FIRE_PIN, LOW);
+        fire_event = time_millis + FIRE_OFF_DURATION;
+      }
+      fire_count--;
+    }
+  } else {
+    digitalWrite(FIRE_PIN, LOW);
     switch(fire_case) {
       case 0: // Single fire
-      
+        fire_count = 2;
         break;
       case 1: // Burst fire
-      
+        fire_count = 6;
         break;
       case 2: // Sustained fire
-      
+        fire_count = 32768;
         break;
       case 3: // undefined, config mode?
         break;
