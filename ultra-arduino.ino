@@ -10,10 +10,12 @@
  * Needed external libs:
  * 
  */
- 
+
+#define SERIAL_DEBUG true
+
 // ---- SETTINGS YOU CAN CHANGE ----
-#define POT_PIN 7
-#define BAT_PIN 6
+#define POT_PIN 1
+#define BAT_PIN 0
 #define FIRE_PIN 5
 #define OPTO_PIN 8
 
@@ -22,20 +24,20 @@
 #define TRG_LED 13
 
 // -- Fire Selector --
-#define FIRE_SELECT_PIN1 2
-#define FIRE_SELECT_PIN2 1
+#define FIRE_SELECT_PIN1 3
+#define FIRE_SELECT_PIN2 2
 
 // -- BLDC Rev System --
-#define REV_PIN 82
+//#define REV_PIN 6
 #define REV_LED 12
 #define REV_SERVO_PIN 9
 
 // -- Delay Section --
-#define DEBOUNCE_DELAY 10
-#define FIRE_ON_DURATION 300
-#define FIRE_OFF_DURATION 500
+#define DEBOUNCE_DELAY 50l
+#define FIRE_ON_DURATION 30
+#define FIRE_OFF_DURATION 50
 
-//#define INVERT_POT_DIRECTION 1  // uncomment to inverse your potentiometer
+//#define INVERT_POT_DIRECTION true  // uncomment to inverse your potentiometer
 float MaxServo = 180;             // Reduce this if you want to electronically Limit your RPM / FPS .. 0 being 0% 180 being 100%
 float MinServo = 0;
 
@@ -56,7 +58,7 @@ int fire_case = 0;
 int whichADCtoRead = 0; // 0 = Pot, 1 = Battery
 int max_pot = MaxServo;
 float battery_level = 0.0f;
-int fire_count = 0;
+unsigned int fire_count = 0;
 unsigned long fire_event = 0;
 
 #ifdef OPTO_PIN
@@ -70,23 +72,26 @@ void setup()
   pinMode(TRG_PIN, INPUT_PULLUP);
   pinMode(POT_PIN, INPUT);
   pinMode(FIRE_PIN, OUTPUT);
+  pinMode(TRG_LED, OUTPUT);
   pinMode(FIRE_SELECT_PIN1, INPUT_PULLUP);
   pinMode(FIRE_SELECT_PIN2, INPUT_PULLUP);
 
   #ifdef OPTO_PIN
   pinMode(OPTO_PIN, INPUT);
+  Serial.println(F("Opto Option Enabled!"));
   #endif
 
-  ADCSRA =  bit(ADEN);
+  ADCSRA  = bit(ADEN);
   ADCSRA |= bit(ADPS0) | bit(ADPS1) | bit(ADPS2);
-  ADMUX =  bit(REFS0) | bit(REFS1) | (POT_PIN & 0x07);
-  bitSet(ADCSRA, ADSC);
+  ADMUX   = bit(REFS0) | /*bit(REFS1) |*/ (POT_PIN & 0x07);
+  delay(2);
 
   #ifdef REV_PIN
   pinMode(REV_PIN, INPUT_PULLUP);
   pinMode(REV_LED, OUTPUT);
   rev_servo.attach(REV_SERVO_PIN);
   rev_servo.write(MinServo);
+  Serial.println(F("BLDC Option Enabled!"));
   #endif
 }
 
@@ -96,11 +101,17 @@ void setup()
  */
 void Buttonsstate(unsigned long time_millis)
 {
+  #ifdef SERIAL_DEBUG
+    Serial.print(F(" TIME: "));
+    Serial.print(time_millis);
+  #endif
+
   #ifdef REV_PIN
   int rev_state = digitalRead(REV_PIN);
   
   if (rev_state != lastButtonState[0]) {
     lastDebounceTime[0] = time_millis;
+    lastButtonState[0] = rev_state;    
   }
   
   if ((time_millis - lastDebounceTime[0]) > DEBOUNCE_DELAY) {
@@ -113,18 +124,21 @@ void Buttonsstate(unsigned long time_millis)
 
   if (trg_state != lastButtonState[1]) {
     lastDebounceTime[1] = time_millis;
+    lastButtonState[1] = trg_state;
   }
 
   int fr1_state = digitalRead(FIRE_SELECT_PIN1);
 
   if (fr1_state != lastButtonState[2]) {
     lastDebounceTime[2] = time_millis;
+    lastButtonState[2] = fr1_state;
   }
 
   int fr2_state = digitalRead(FIRE_SELECT_PIN2);
 
   if (fr2_state != lastButtonState[3]) {
     lastDebounceTime[3] = time_millis;
+    lastButtonState[3] = fr2_state;
   }
 
   #ifdef OPTO_PIN
@@ -138,27 +152,26 @@ void Buttonsstate(unsigned long time_millis)
     // dart size is 2.84in = 0.236667ft
     // one second has 1.000.000us 
     opto_fps = 236667.6f / opto_timing;
-  }  
+  }
   #endif
 
   if ((time_millis - lastDebounceTime[1]) > DEBOUNCE_DELAY) {
     Trigger = (bool) trg_state;
-    digitalWrite(TRG_LED, trg_state);
   }
 
   if ((time_millis - lastDebounceTime[2]) > DEBOUNCE_DELAY) {
     if (fr1_state) {
-      fire_case |= (1 << 1);
+      fire_case |= (1 << 0);
     } else {
-      fire_case &= ~(1 << 1);
+      fire_case &= ~(1 << 0);
     }
   }
 
   if ((time_millis - lastDebounceTime[3]) > DEBOUNCE_DELAY) {
     if (fr2_state) {
-      fire_case |= (1 << 2);
+      fire_case |= (1 << 1);
     } else {
-      fire_case &= ~(1 << 2);
+      fire_case &= ~(1 << 1);
     }
   }
 } // buttonState
@@ -180,58 +193,81 @@ void loop() {
   Buttonsstate(time_millis);
 
   // ADC Section
+  //int tADCSRA = ADCSRA;
   if (bit_is_clear(ADCSRA, ADSC)) {
-    int value = ADC;
+    uint8_t low = ADCL;
+    uint8_t high = ADCH;    
+    int value = (high << 8) | low;
     switch (whichADCtoRead) {
       case 0:
         max_pot = pot(value);
-        ADMUX = bit(REFS0) | bit(REFS1) | (BAT_PIN & 0x07);
+        ADMUX = bit(REFS0) | /*bit(REFS1) |*/ (BAT_PIN & 0x07);
         whichADCtoRead = 1;
         break;
       case 1:
-        battery_level = 1.1 / value * 1024.0;
-        ADMUX = bit(REFS0) | bit(REFS1) | (POT_PIN & 0x07);
+        battery_level = 5.0 / 1024.0 * value;
+        ADMUX = bit(REFS0) | /*bit(REFS1) |*/ (POT_PIN & 0x07);
         whichADCtoRead = 0;
         break;
     }
     bitSet(ADCSRA, ADSC);
+    #ifdef SERIAL_DEBUG
+    Serial.print(F(" POT: "));
+    Serial.print(max_pot);
+    Serial.print(F(" BAT: "));
+    Serial.print(battery_level);
+    #endif
   }
 
   #ifdef REV_PIN
   // REV Trigger Section
-  if (RevTrigger) {
+  if (!RevTrigger) {
     rev_servo.write(max_pot);
   } else {
     rev_servo.write(MinServo);
   }
+    #ifdef SERIAL_DEBUG
+    Serial.print(F(" REV: "));
+    Serial.print(RevTrigger);
+    #endif
   #endif
 
   // Trigger Section
-  if (Trigger) {
+  if (!Trigger) {
     if (time_millis > fire_event && fire_count > 0) {
       if (fire_count % 2 == 0) {
         digitalWrite(FIRE_PIN, HIGH);
+        digitalWrite(TRG_LED, HIGH);
         fire_event = time_millis + FIRE_ON_DURATION;
       } else {
         digitalWrite(FIRE_PIN, LOW);
+        digitalWrite(TRG_LED, LOW);
         fire_event = time_millis + FIRE_OFF_DURATION;
       }
       fire_count--;
     }
   } else {
     digitalWrite(FIRE_PIN, LOW);
+    digitalWrite(TRG_LED, LOW);      
     switch(fire_case) {
-      case 0: // Single fire
+      case 3: // Single fire
         fire_count = 2;
         break;
-      case 1: // Burst fire
+      case 2: // Burst fire
         fire_count = 6;
         break;
-      case 2: // Sustained fire
+      case 1: // Sustained fire
         fire_count = 32768;
         break;
-      case 3: // undefined, config mode?
+      case 0: // undefined, config mode?
         break;
     }
   }
+
+  #ifdef SERIAL_DEBUG
+  Serial.print(F(" TRG: "));
+  Serial.print(Trigger);
+  Serial.print(F(" FRC: "));
+  Serial.println(fire_case);
+  #endif
 }
