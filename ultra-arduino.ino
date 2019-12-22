@@ -8,38 +8,38 @@
    Modified by vogt31337
 
    Needed external libs:
-
+   TCS34725 by hidekiatai ver. 0.1.0
 */
 
 #define SERIAL_DEBUG true
 
 // ---- SETTINGS YOU CAN CHANGE ----
-#define POT_PIN 1
-#define BAT_PIN 0
-#define FIRE_PIN 5
-#define OPTO_PIN 8
+#define POT_PIN 1   // A1, measure pot for setting rev speed, if bldc
+#define BAT_PIN 0   // A0, measure bat voltage
+#define FIRE_PIN 2  // Pin to pull high for a fire impulse
+#define OPTO_PIN 5  // Pin to read for fps calculation
 
 // -- Trigger Pin --
-#define TRG_PIN 4
-#define TRG_LED 13
+#define TRG_PIN 3   // Pin which is connected to the trigger button
+#define TRG_LED 13  // Pin / LED which will show trigger status, for debugging
 
 // -- Fire Selector --
-#define FIRE_SELECT_PIN1 3
-#define FIRE_SELECT_PIN2 2
+#define FIRE_SELECT_PIN1 7 // Two pins to select how many pulses per trigger are produced
+#define FIRE_SELECT_PIN2 8
 
 // -- BLDC Rev System --
-//#define REV_PIN 6
+//#define REV_PIN 6   // BLDC section, untested
 #define REV_LED 12
 #define REV_SERVO_PIN 9
 
 // -- Delay Section --
 #define DEBOUNCE_DELAY 50l
-#define FIRE_ON_DURATION 30
+#define FIRE_ON_DURATION 300
 #define FIRE_OFF_DURATION 50
 
 // -- Mag Sesnor Section --
-#define MAG_SENSE 1
-#define MAG_SENSE_PIN 11
+#define MAG_SENSE true
+#define MAG_SENSE_PIN 4
 #define MAG_LED_PIN 10
 
 //#define INVERT_POT_DIRECTION true  // uncomment to inverse your potentiometer
@@ -85,6 +85,8 @@ void setup()
   pinMode(POT_PIN, INPUT);
   pinMode(FIRE_PIN, OUTPUT);
   pinMode(TRG_LED, OUTPUT);
+  digitalWrite(FIRE_PIN, LOW);
+  digitalWrite(TRG_LED, LOW);
   pinMode(FIRE_SELECT_PIN1, INPUT_PULLUP);
   pinMode(FIRE_SELECT_PIN2, INPUT_PULLUP);
 #ifdef MAG_SENSE
@@ -180,7 +182,8 @@ void Buttonsstate(unsigned long time_millis)
 #ifdef OPTO_PIN
   int opto_state = digitalRead(OPTO_PIN);
 
-  if (opto_state) {
+  // my opto sensor is active low.
+  if (!opto_state) {
     opto_timing = micros();
   } else {
     opto_timing = micros() - opto_timing;
@@ -260,8 +263,10 @@ void loop() {
     }
     bitSet(ADCSRA, ADSC);
 #ifdef SERIAL_DEBUG
-    Serial.print(F(" POT: "));
-    Serial.print(max_pot);
+//    Serial.print(F(" POT: "));
+//    Serial.print(max_pot);
+    Serial.print(F(" FPS: "));
+    Serial.print(opto_fps);
     Serial.print(F(" BAT: "));
     Serial.print(battery_level);
 #endif
@@ -317,11 +322,11 @@ void loop() {
     {
         TCS34725::Color color = tcs.color();
 #ifdef SERIAL_DEBUG
-        Serial.print(F("Color Temp : ")); Serial.println(tcs.colorTemperature());
-        Serial.print(F("Lux        : ")); Serial.println(tcs.lux());
-        Serial.print(F("R          : ")); Serial.println(color.r);
-        Serial.print(F("G          : ")); Serial.println(color.g);
-        Serial.print(F("B          : ")); Serial.println(color.b);
+//        Serial.print(F(" Tmp: ")); Serial.print(tcs.colorTemperature());
+        Serial.print(F(" Lux: ")); Serial.print(tcs.lux());
+        Serial.print(F(" R: "));   Serial.print(color.r);
+        Serial.print(F(" G: "));   Serial.print(color.g);
+        Serial.print(F(" B: "));   Serial.print(color.b);
 #endif
     }
 #endif
