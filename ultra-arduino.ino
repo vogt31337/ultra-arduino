@@ -8,12 +8,12 @@
    Modified by vogt31337
 
    Needed external libs:
-   TCS34725 by hidekiatai ver. 0.1.0
+   TCS34725 by hideakitai ver. 0.1.0
 */
 
-#define SERIAL_DEBUG true
+//#define SERIAL_DEBUG true
 
-// ---- SETTINGS YOU CAN CHANGE ----
+// ---- SETTINGS AREA ----
 #define POT_PIN 1   // A1, measure pot for setting rev speed, if bldc
 #define BAT_PIN 0   // A0, measure bat voltage
 #define FIRE_PIN 2  // Pin to pull high for a fire impulse
@@ -34,8 +34,8 @@
 
 // -- Delay Section --
 #define DEBOUNCE_DELAY 50l
-#define FIRE_ON_DURATION 300
-#define FIRE_OFF_DURATION 50
+#define FIRE_ON_DURATION 200 // Nice value for my solenoid maybe needs some tweaking
+#define FIRE_OFF_DURATION 100
 
 // -- Mag Sesnor Section --
 #define MAG_SENSE true
@@ -61,11 +61,12 @@ bool RevTrigger = false;
 #endif
 
 unsigned long lastDebounceTime[5] = {0, 0, 0, 0, 0};
-int lastButtonState[5] = {LOW, LOW, LOW, LOW, LOW};
+int lastButtonState[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
 
 bool Trigger = false;
 int fire_case = 0;
 int mag_case = 0;
+int shots_fired = 0;
 
 int whichADCtoRead = 0; // 0 = Pot, 1 = Battery
 int max_pot = MaxServo;
@@ -182,15 +183,19 @@ void Buttonsstate(unsigned long time_millis)
 #ifdef OPTO_PIN
   int opto_state = digitalRead(OPTO_PIN);
 
-  // my opto sensor is active low.
-  if (!opto_state) {
-    opto_timing = micros();
-  } else {
-    opto_timing = micros() - opto_timing;
-    // divide size of dart by timing to get fps
-    // dart size is 2.84in = 0.236667ft
-    // one second has 1.000.000us
-    opto_fps = 236667.6f / opto_timing;
+  // only work on change
+  if (opto_state != lastButtonState[5]) {
+    lastButtonState[5] = opto_state;
+    // my sensor is active low
+    if (!opto_state) {
+      opto_timing = micros();
+    } else {
+      opto_timing = micros() - opto_timing;
+      // divide size of dart by timing to get fps
+      // dart size is 2.84in = 0.236667ft
+      // one second has 1.000.000us
+      opto_fps = 236667.6f / opto_timing;
+    }
   }
 #endif
 
@@ -216,12 +221,15 @@ void Buttonsstate(unsigned long time_millis)
 
 #ifdef MAG_SENSE
   if ((time_millis - lastDebounceTime[4]) > DEBOUNCE_DELAY) {
-    if (mag_state) {
+    if (!mag_state) {
       mag_case |= (1 << 0);
-      digitalWrite(MAG_LED_PIN, LOW);
+      digitalWrite(MAG_LED_PIN, HIGH);
+//      tcs.power(true);
     } else {
       mag_case &= ~(1 << 0);
-      digitalWrite(MAG_LED_PIN, HIGH);
+      digitalWrite(MAG_LED_PIN, LOW);
+      shots_fired = 0;
+//      tcs.power(false);
     }
   }
 #endif
@@ -239,6 +247,12 @@ int pot(int current_pot) {
 #endif
 }
 
+/**
+ * This whole code works event based.
+ * Which means every action performed has a time stamp (time_millis),
+ *  and a time when it should happen again, when it should end, etc.
+ * So functions in the main loop must not waste cycles or block!
+ */
 void loop() {
   unsigned long time_millis = millis();
   Buttonsstate(time_millis);
@@ -292,6 +306,7 @@ void loop() {
         digitalWrite(FIRE_PIN, HIGH);
         digitalWrite(TRG_LED, HIGH);
         fire_event = time_millis + FIRE_ON_DURATION;
+        shots_fired++;
       } else {
         digitalWrite(FIRE_PIN, LOW);
         digitalWrite(TRG_LED, LOW);
@@ -318,16 +333,18 @@ void loop() {
   }
 
 #ifdef MAG_SENSE
-  if (tcs.available()) // if current measurement has done
+  if (mag_case == 1 && tcs.available()) // if current measurement is done
     {
         TCS34725::Color color = tcs.color();
-#ifdef SERIAL_DEBUG
+//        digitalWrite(MAG_LED_PIN, LOW);
+//#ifdef SERIAL_DEBUG
 //        Serial.print(F(" Tmp: ")); Serial.print(tcs.colorTemperature());
         Serial.print(F(" Lux: ")); Serial.print(tcs.lux());
         Serial.print(F(" R: "));   Serial.print(color.r);
         Serial.print(F(" G: "));   Serial.print(color.g);
-        Serial.print(F(" B: "));   Serial.print(color.b);
-#endif
+        Serial.print(F(" B: "));   Serial.println(color.b);
+//#endif
+      // Identify magazine. I think for now I'll hard code this part.
     }
 #endif
 
