@@ -6,12 +6,14 @@
 
    Created By Michael Dixon (Ultrasonic2) Auckland New Zealand
    Modified by vogt31337
-
    Needed external libs:
+
    TCS34725 by hideakitai ver. 0.1.0
 */
 
 //#define SERIAL_DEBUG true
+
+#define DISP true
 
 // ---- SETTINGS AREA ----
 #define POT_PIN 1   // A1, measure pot for setting rev speed, if bldc
@@ -58,6 +60,18 @@ TCS34725 tcs;
 #include <Servo.h>
 Servo rev_servo;
 bool RevTrigger = false;
+#endif
+
+#ifdef DISP
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire);
+unsigned long refreshDisplay = 0;
 #endif
 
 unsigned long lastDebounceTime[5] = {0, 0, 0, 0, 0};
@@ -123,6 +137,21 @@ void setup()
   tcs.integrationTime(33); // ms
   tcs.gain(TCS34725::Gain::X01);
 #endif
+
+#ifdef DISP
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x64
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;); // Don't proceed, loop forever
+  }
+
+  display.display();
+  display.clearDisplay();
+#endif
+}
+
+void updateDisplay() {
+  
 }
 
 /**
@@ -346,6 +375,13 @@ void loop() {
 //#endif
       // Identify magazine. I think for now I'll hard code this part.
     }
+#endif
+
+#ifdef DISP
+  if (time_millis > refreshDisplay) {
+    refreshDisplay = time_millis + 100;
+    updateDisplay();
+  }
 #endif
 
 #ifdef SERIAL_DEBUG
