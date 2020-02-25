@@ -52,6 +52,7 @@ float MinServo = 0;
 #include <Wire.h>
 #include "TCS34725.h"
 TCS34725 tcs;
+unsigned long mag_case = 0;
 #endif
 
 #ifdef REV_PIN
@@ -65,7 +66,6 @@ int lastButtonState[5] = {LOW, LOW, LOW, LOW, LOW};
 
 bool Trigger = false;
 int fire_case = 0;
-int mag_case = 0;
 
 int whichADCtoRead = 0; // 0 = Pot, 1 = Battery
 int max_pot = MaxServo;
@@ -214,10 +214,10 @@ void Buttonsstate(unsigned long time_millis)
 #ifdef MAG_SENSE
   if ((time_millis - lastDebounceTime[4]) > DEBOUNCE_DELAY) {
     if (mag_state) {
-      mag_case |= (1 << 0);
+      mag_case = time_millis + 200;
       digitalWrite(MAG_LED_PIN, LOW);
     } else {
-      mag_case &= ~(1 << 0);
+      mag_case = 0;
       digitalWrite(MAG_LED_PIN, HIGH);
     }
   }
@@ -235,6 +235,8 @@ int pot(int current_pot) {
   return map(current_pot, 0, 1023, MinServo, MaxServo);
 #endif
 }
+
+// ------------------------------ main loop ------------------------------
 
 void loop() {
   unsigned long time_millis = millis();
@@ -313,17 +315,20 @@ void loop() {
   }
 
 #ifdef MAG_SENSE
-  if (tcs.available()) // if current measurement has done
-    {
-        TCS34725::Color color = tcs.color();
-#ifdef SERIAL_DEBUG
-        Serial.print(F("Color Temp : ")); Serial.println(tcs.colorTemperature());
-        Serial.print(F("Lux        : ")); Serial.println(tcs.lux());
-        Serial.print(F("R          : ")); Serial.println(color.r);
-        Serial.print(F("G          : ")); Serial.println(color.g);
-        Serial.print(F("B          : ")); Serial.println(color.b);
-#endif
+  if (mag_case != 0 && time_millis > mag_case) 
+  {
+    while (!tcs.available()) { // if current measurement has done
+      delay(2);
     }
+    TCS34725::Color color = tcs.color();
+#ifdef SERIAL_DEBUG
+    Serial.print(F("Color Temp : ")); Serial.println(tcs.colorTemperature());
+    Serial.print(F("Lux        : ")); Serial.println(tcs.lux());
+    Serial.print(F("R          : ")); Serial.println(color.r);
+    Serial.print(F("G          : ")); Serial.println(color.g);
+    Serial.print(F("B          : ")); Serial.println(color.b);
+#endif
+  }
 #endif
 
 #ifdef SERIAL_DEBUG
