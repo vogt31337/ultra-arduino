@@ -6,40 +6,42 @@
 
    Created By Michael Dixon (Ultrasonic2) Auckland New Zealand
    Modified by vogt31337
-
    Needed external libs:
 
+   TCS34725 by hideakitai ver. 0.1.0
 */
 
-#define SERIAL_DEBUG true
+//#define SERIAL_DEBUG true
 
-// ---- SETTINGS YOU CAN CHANGE ----
-#define POT_PIN 1
-#define BAT_PIN 0
-#define FIRE_PIN 5
-#define OPTO_PIN 8
+#define DISP true
+
+// ---- SETTINGS AREA ----
+#define POT_PIN 1   // A1, measure pot for setting rev speed, if bldc
+#define BAT_PIN 0   // A0, measure bat voltage
+#define FIRE_PIN 2  // Pin to pull high for a fire impulse
+#define OPTO_PIN 5  // Pin to read for fps calculation
 
 // -- Trigger Pin --
-#define TRG_PIN 4
-#define TRG_LED 13
+#define TRG_PIN 3   // Pin which is connected to the trigger button
+#define TRG_LED 13  // Pin / LED which will show trigger status, for debugging
 
 // -- Fire Selector --
-#define FIRE_SELECT_PIN1 3
-#define FIRE_SELECT_PIN2 2
+#define FIRE_SELECT_PIN1 7 // Two pins to select how many pulses per trigger are produced
+#define FIRE_SELECT_PIN2 8
 
 // -- BLDC Rev System --
-//#define REV_PIN 6
+//#define REV_PIN 6   // BLDC section, untested
 #define REV_LED 12
 #define REV_SERVO_PIN 9
 
 // -- Delay Section --
 #define DEBOUNCE_DELAY 50l
-#define FIRE_ON_DURATION 30
-#define FIRE_OFF_DURATION 50
+#define FIRE_ON_DURATION 200 // Nice value for my solenoid maybe needs some tweaking
+#define FIRE_OFF_DURATION 100
 
 // -- Mag Sesnor Section --
-#define MAG_SENSE 1
-#define MAG_SENSE_PIN 11
+#define MAG_SENSE true
+#define MAG_SENSE_PIN 4
 #define MAG_LED_PIN 10
 
 //#define INVERT_POT_DIRECTION true  // uncomment to inverse your potentiometer
@@ -61,11 +63,25 @@ Servo rev_servo;
 bool RevTrigger = false;
 #endif
 
+#ifdef DISP
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire);
+unsigned long refreshDisplay = 0;
+#endif
+
 unsigned long lastDebounceTime[5] = {0, 0, 0, 0, 0};
-int lastButtonState[5] = {LOW, LOW, LOW, LOW, LOW};
+int lastButtonState[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
 
 bool Trigger = false;
 int fire_case = 0;
+int mag_case = 0;
+int shots_fired = 0;
 
 int whichADCtoRead = 0; // 0 = Pot, 1 = Battery
 int max_pot = MaxServo;
@@ -85,6 +101,8 @@ void setup()
   pinMode(POT_PIN, INPUT);
   pinMode(FIRE_PIN, OUTPUT);
   pinMode(TRG_LED, OUTPUT);
+  digitalWrite(FIRE_PIN, LOW);
+  digitalWrite(TRG_LED, LOW);
   pinMode(FIRE_SELECT_PIN1, INPUT_PULLUP);
   pinMode(FIRE_SELECT_PIN2, INPUT_PULLUP);
 #ifdef MAG_SENSE
@@ -120,6 +138,21 @@ void setup()
   tcs.integrationTime(33); // ms
   tcs.gain(TCS34725::Gain::X01);
 #endif
+
+#ifdef DISP
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x64
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;); // Don't proceed, loop forever
+  }
+
+  display.display();
+  display.clearDisplay();
+#endif
+}
+
+void updateDisplay() {
+  
 }
 
 /**
@@ -180,14 +213,19 @@ void Buttonsstate(unsigned long time_millis)
 #ifdef OPTO_PIN
   int opto_state = digitalRead(OPTO_PIN);
 
-  if (opto_state) {
-    opto_timing = micros();
-  } else {
-    opto_timing = micros() - opto_timing;
-    // divide size of dart by timing to get fps
-    // dart size is 2.84in = 0.236667ft
-    // one second has 1.000.000us
-    opto_fps = 236667.6f / opto_timing;
+  // only work on change
+  if (opto_state != lastButtonState[5]) {
+    lastButtonState[5] = opto_state;
+    // my sensor is active low
+    if (!opto_state) {
+      opto_timing = micros();
+    } else {
+      opto_timing = micros() - opto_timing;
+      // divide size of dart by timing to get fps
+      // dart size is 2.84in = 0.236667ft
+      // one second has 1.000.000us
+      opto_fps = 236667.6f / opto_timing;
+    }
   }
 #endif
 
@@ -213,12 +251,15 @@ void Buttonsstate(unsigned long time_millis)
 
 #ifdef MAG_SENSE
   if ((time_millis - lastDebounceTime[4]) > DEBOUNCE_DELAY) {
-    if (mag_state) {
-      mag_case = time_millis + 200;
-      digitalWrite(MAG_LED_PIN, LOW);
-    } else {
-      mag_case = 0;
+    if (!mag_state) {
+      mag_case |= (1 << 0);
       digitalWrite(MAG_LED_PIN, HIGH);
+//      tcs.power(true);
+    } else {
+      mag_case &= ~(1 << 0);
+      digitalWrite(MAG_LED_PIN, LOW);
+      shots_fired = 0;
+//      tcs.power(false);
     }
   }
 #endif
@@ -237,7 +278,12 @@ int pot(int current_pot) {
 }
 
 // ------------------------------ main loop ------------------------------
-
+/**
+ * This whole code works event based.
+ * Which means every action performed has a time stamp (time_millis),
+ *  and a time when it should happen again, when it should end, etc.
+ * So functions in the main loop must not waste cycles or block!
+ */
 void loop() {
   unsigned long time_millis = millis();
   Buttonsstate(time_millis);
@@ -262,8 +308,10 @@ void loop() {
     }
     bitSet(ADCSRA, ADSC);
 #ifdef SERIAL_DEBUG
-    Serial.print(F(" POT: "));
-    Serial.print(max_pot);
+//    Serial.print(F(" POT: "));
+//    Serial.print(max_pot);
+    Serial.print(F(" FPS: "));
+    Serial.print(opto_fps);
     Serial.print(F(" BAT: "));
     Serial.print(battery_level);
 #endif
@@ -289,6 +337,7 @@ void loop() {
         digitalWrite(FIRE_PIN, HIGH);
         digitalWrite(TRG_LED, HIGH);
         fire_event = time_millis + FIRE_ON_DURATION;
+        shots_fired++;
       } else {
         digitalWrite(FIRE_PIN, LOW);
         digitalWrite(TRG_LED, LOW);
@@ -315,19 +364,25 @@ void loop() {
   }
 
 #ifdef MAG_SENSE
-  if (mag_case != 0 && time_millis > mag_case) 
-  {
-    while (!tcs.available()) { // if current measurement has done
-      delay(2);
+  if (mag_case == 1 && tcs.available()) // if current measurement is done
+    {
+        TCS34725::Color color = tcs.color();
+//        digitalWrite(MAG_LED_PIN, LOW);
+//#ifdef SERIAL_DEBUG
+//        Serial.print(F(" Tmp: ")); Serial.print(tcs.colorTemperature());
+        Serial.print(F(" Lux: ")); Serial.print(tcs.lux());
+        Serial.print(F(" R: "));   Serial.print(color.r);
+        Serial.print(F(" G: "));   Serial.print(color.g);
+        Serial.print(F(" B: "));   Serial.println(color.b);
+//#endif
+      // Identify magazine. I think for now I'll hard code this part.
     }
-    TCS34725::Color color = tcs.color();
-#ifdef SERIAL_DEBUG
-    Serial.print(F("Color Temp : ")); Serial.println(tcs.colorTemperature());
-    Serial.print(F("Lux        : ")); Serial.println(tcs.lux());
-    Serial.print(F("R          : ")); Serial.println(color.r);
-    Serial.print(F("G          : ")); Serial.println(color.g);
-    Serial.print(F("B          : ")); Serial.println(color.b);
 #endif
+
+#ifdef DISP
+  if (time_millis > refreshDisplay) {
+    refreshDisplay = time_millis + 100;
+    updateDisplay();
   }
 #endif
 
