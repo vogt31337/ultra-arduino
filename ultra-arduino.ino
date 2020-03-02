@@ -54,6 +54,7 @@ float MinServo = 0;
 #include <Wire.h>
 #include "TCS34725.h"
 TCS34725 tcs;
+TCS34725::Color color;
 unsigned long mag_case = 0;
 #endif
 
@@ -73,6 +74,32 @@ bool RevTrigger = false;
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire);
 unsigned long refreshDisplay = 0;
+
+#define LOGO_HEIGHT 8
+#define LOGO_WIDTH  8
+
+static const unsigned char PROGMEM logo_shell[] = {
+  B00111110,
+  B00100010,
+  B00100010,
+  B00100010,
+  B00100010,
+  B00111110,
+  B00100010,
+  B00111110
+};
+
+static const unsigned char PROGMEM logo_shell2[] = {
+  B00111101, B11101111,
+  B00100101, B00101001,
+  B00100101, B00101001,
+  B00100101, B00101001,
+  B00100101, B00101001,
+  B00111101, B11101111,
+  B00100101, B00101001,
+  B00111101, B11101111
+};
+
 #endif
 
 unsigned long lastDebounceTime[5] = {0, 0, 0, 0, 0};
@@ -80,7 +107,7 @@ int lastButtonState[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
 
 bool Trigger = false;
 int fire_case = 0;
-int mag_case = 0;
+// int mag_case = 0;
 int shots_fired = 0;
 
 int whichADCtoRead = 0; // 0 = Pot, 1 = Battery
@@ -152,7 +179,51 @@ void setup()
 }
 
 void updateDisplay() {
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
   
+  // -- ADC --
+  display.setTextSize(1);
+  display.print(battery_level);
+  display.drawFastHLine(0, 9, 128, WHITE);
+
+  // -- Mode --
+    switch (fire_case) {
+      case 3: // Single fire
+        display.drawBitmap(120, 0, logo_shell, 8, 8, WHITE);
+        break;
+      case 2: // Burst fire
+        display.drawBitmap(112, 0, logo_shell2, 16, 8, WHITE);
+        break;
+      case 1: // Sustained fire
+        // :-(
+        break;
+      case 0: // undefined, config mode?
+        break;
+    }
+
+  // -- Shot Counter --
+  display.setCursor(56, 15);
+  display.setTextSize(5);
+  display.print(shots_fired);
+
+  // -- Bar Graphs --
+  display.drawFastHLine(0, 53, 128, WHITE);
+  display.setTextSize(1);
+  display.setCursor( 0, 55);
+  display.print((int)color.r);
+  display.setCursor(20, 55);
+  display.print((int)color.g);
+  display.setCursor(40, 55);
+  display.print((int)color.b);
+
+  // -- FPS --
+  display.setCursor(84, 55);
+  display.print(opto_fps);
+  
+  // -- finished --
+  display.display();
 }
 
 /**
@@ -366,7 +437,7 @@ void loop() {
 #ifdef MAG_SENSE
   if (mag_case == 1 && tcs.available()) // if current measurement is done
     {
-        TCS34725::Color color = tcs.color();
+        color = tcs.color();
 //        digitalWrite(MAG_LED_PIN, LOW);
 //#ifdef SERIAL_DEBUG
 //        Serial.print(F(" Tmp: ")); Serial.print(tcs.colorTemperature());
